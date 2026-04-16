@@ -1,0 +1,70 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python .autoresearch/scripts/*)",
+      "Bash(bash .autoresearch/scripts/*)",
+      "Bash(export AR_TASK_DIR=*)",
+      "Bash(curl *127.0.0.1*)",
+      "Bash(git *)",
+      "Bash(ssh *)",
+      "Bash(mkdir *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Read(/**)"
+    ],
+    "defaultMode": "bypassPermissions"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel 2>/dev/null)\" 2>/dev/null; [ ! -f .autoresearch/.active_task ] && exit 0; python .autoresearch/scripts/hook_guard_edit.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel 2>/dev/null)\" 2>/dev/null; python .autoresearch/scripts/hook_guard_bash.py"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel 2>/dev/null)\" 2>/dev/null; python .autoresearch/scripts/hook_post_bash.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel 2>/dev/null)\" 2>/dev/null; [ ! -f .autoresearch/.active_task ] && exit 0; python .autoresearch/scripts/hook_post_edit.py"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel 2>/dev/null)\" 2>/dev/null; [ ! -f .autoresearch/.active_task ] && exit 0; python .autoresearch/scripts/hook_stop_save.py"
+          }
+        ]
+      }
+    ]
+  }
+}
