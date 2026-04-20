@@ -30,7 +30,7 @@ _BLESSED_SCRIPTS = {
     "quick_check.py", "eval_wrapper.py", "keep_or_discard.py",
     "scaffold.py", "baseline.py", "_baseline_init.py", "dashboard.py",
     "create_plan.py", "settle.py", "pipeline.py", "resume.py",
-    "reference_capture.py",
+    "reference_capture.py", "code_checker.py",
 }
 
 # Commonly hallucinated names → suggestions
