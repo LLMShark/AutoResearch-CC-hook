@@ -182,6 +182,26 @@ CODE_EDIT_PHASES = {p for p, classes in _EDIT_RULES.items() if "editable" in cla
 REF_WRITE_PHASES = {p for p, classes in _EDIT_RULES.items() if "ref" in classes}
 
 
+# Shared plan-item scaffolding shown in PLAN / DIAGNOSE / REPLAN guidance.
+# The example is deliberately a short SENTENCE (not a snake_case identifier) —
+# dashboards surface `desc` directly in the history and plan tables, so
+# "Fuse SwiGLU into the matmul epilogue to avoid a second launch" reads far
+# better than "fuse_swiglu_epilogue". create_plan.py enforces the prose form.
+_PLAN_ITEM_EXAMPLE = (
+    '{"desc": "Fuse SwiGLU into the matmul epilogue to avoid a second launch",'
+    ' "rationale": "Separate SwiGLU kernel re-reads the matmul output from DRAM;'
+    ' fusing it into the epilogue cuts one round-trip and a launch.",'
+    ' "keywords": "fusion, epilogue"}'
+)
+_PLAN_FIELD_RULES = (
+    "Provide >= 3 items as a JSON array. Each item needs:\n"
+    "  - desc:      short SENTENCE describing the change (>=12 chars, must have "
+    "spaces — not a snake_case label; the dashboard shows this verbatim)\n"
+    "  - rationale: 30-400 char explanation of WHY it should help\n"
+    "  - keywords:  comma-separated tags or JSON list, e.g. \"fusion, epilogue\""
+)
+
+
 def _is_readonly_bash(command: str) -> bool:
     for pat in _READONLY_PATTERNS:
         if re.search(pat, command.strip()):
@@ -546,8 +566,8 @@ def get_guidance(task_dir: str) -> str:
         return (f"[AR Phase: PLAN] "
                 f"Read task.yaml, editable files ({editable}), and reference.py.{skills_hint}{metric_hint}\n"
                 f"Then create the plan by running:\n"
-                f'python .autoresearch/scripts/create_plan.py "{task_dir}" \'[{{"desc": "...", "rationale": "... (30-400 chars)", "keywords": "k1, k2"}}, ...]\'\n'
-                f"Provide >= 3 items as JSON array. Each item needs: desc, rationale (30-400 chars), keywords.\n"
+                f'python .autoresearch/scripts/create_plan.py "{task_dir}" \'[{_PLAN_ITEM_EXAMPLE}, ...]\'\n'
+                f"{_PLAN_FIELD_RULES}\n"
                 f"The script writes plan.md in the correct format. Hook validates and advances to EDIT.\n"
                 f"After plan creation, sync items to TodoWrite.")
 
@@ -588,7 +608,8 @@ def get_guidance(task_dir: str) -> str:
                 f"  - NOT more parameter tuning\n"
                 f"Recent failures:\n{fail_summary}\n"
                 f"After diagnosis, create NEW plan with >= 3 items:\n"
-                f'python .autoresearch/scripts/create_plan.py "{task_dir}" \'[{{"desc":"...","rationale":"...","keywords":"..."}},...]\'\n'
+                f'python .autoresearch/scripts/create_plan.py "{task_dir}" \'[{_PLAN_ITEM_EXAMPLE}, ...]\'\n'
+                f"{_PLAN_FIELD_RULES}\n"
                 f"Items must be diverse: max 1 parameter-tuning item, rest must be structural changes.\n"
                 f"If a past DISCARD/FAIL pid now looks salvageable (e.g. root "
                 f"cause was unrelated, structural state has changed), add "
@@ -618,7 +639,8 @@ def get_guidance(task_dir: str) -> str:
         return (f"[AR Phase: REPLAN] All items settled. Budget: {remaining} rounds left. "
                 f"Read .ar_state/history.jsonl. Analyze what worked/failed.\n"
                 f"To continue, create new plan:\n"
-                f'python .autoresearch/scripts/create_plan.py "{task_dir}" \'[{{"desc": "...", "rationale": "...", "keywords": "..."}},...]\'\n'
+                f'python .autoresearch/scripts/create_plan.py "{task_dir}" \'[{_PLAN_ITEM_EXAMPLE}, ...]\'\n'
+                f"{_PLAN_FIELD_RULES}\n"
                 f"Or if no promising directions, do nothing (hooks will advance to FINISH)."
                 f"{reactivation_hint}")
 

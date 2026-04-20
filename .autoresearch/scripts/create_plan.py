@@ -83,6 +83,20 @@ def _validate_items(items):
             if not isinstance(item[field], str) or not item[field].strip():
                 _fail(f"Item {i}: '{field}' must be a non-empty string")
 
+        # desc must be a short prose sentence, not a snake_case identifier —
+        # the history table and plan table in the dashboard surface this
+        # field directly, and "fuse_swiglu_epilogue" is unreadable next to
+        # "Fuse the SwiGLU epilogue into the matmul kernel".
+        desc = item["desc"].strip()
+        item["desc"] = desc
+        if len(desc) < 12:
+            _fail(f"Item {i}: desc too short ({len(desc)} chars, need >= 12 — "
+                  f"write a short sentence, not a label)")
+        if " " not in desc:
+            _fail(f"Item {i}: desc looks like an identifier ({desc!r}) — "
+                  f"write a short sentence describing the change instead "
+                  f"(e.g. 'Fuse SwiGLU into the matmul epilogue')")
+
         rat = item["rationale"].strip()
         if len(rat) < 30:
             _fail(f"Item {i}: rationale too short ({len(rat)} chars, need >= 30)")
