@@ -14,6 +14,10 @@ one, or kick off the optimization. The hook machine takes it from there.
   `--ref <file> --op-name <name> --backend ascend|cuda|cpu [--arch <arch>]
   [--kernel <file>] [--worker-url <host:port>] [--max-rounds <N>]
   [--dsl <name>] [--framework <name>]`
+
+  Convention: source `--ref` / `--kernel` files live in `workspace/`, named
+  `workspace/<op_name>_ref.py` and `workspace/<op_name>_kernel.py`. Put new
+  candidates there before invoking `/autoresearch`.
 - **Desc mode** — new task from a natural-language description:
   `--desc "fused ReLU + LayerNorm, (32,1024), fp16" --backend cuda`
 

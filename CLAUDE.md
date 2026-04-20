@@ -15,8 +15,10 @@ but fully standalone with zero external dependencies beyond Python + PyYAML.
 cd claude-autoresearch
 claude
 
-# 2. Start a task (init + run is one command)
-/autoresearch --ref path/to/reference.py --op-name my_kernel --backend cuda
+# 2. Start a task (init + run is one command).
+#    Drop the source ref/kernel files into workspace/ first, named
+#    workspace/<op_name>_ref.py and workspace/<op_name>_kernel.py.
+/autoresearch --ref workspace/<op_name>_ref.py --op-name <op_name> --backend cuda
 
 # 3. Resume later
 /autoresearch --resume
