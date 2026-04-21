@@ -131,7 +131,14 @@ def main():
     failures = progress.get("consecutive_failures", 0)
 
     improv = ""
-    if best and baseline and isinstance(best, (int, float)) and isinstance(baseline, (int, float)) and baseline != 0 and best != 0:
+    if (
+        best is not None
+        and baseline is not None
+        and isinstance(best, (int, float))
+        and isinstance(baseline, (int, float))
+        and baseline != 0
+        and best != 0
+    ):
         pct = (baseline - best) / abs(baseline) * 100
         speedup = baseline / best
         improv = f" ({speedup:.2f}x vs ref, {pct:+.1f}%)"

@@ -23,10 +23,25 @@ from phase_machine import compute_next_phase, plan_path
 
 
 def main():
+    if len(sys.argv) != 3:
+        print(json.dumps({
+            "error": "invalid arguments",
+            "usage": "python settle.py <task_dir> <decision_json>",
+            "received_args": sys.argv[1:],
+        }))
+        sys.exit(1)
+
     task_dir = sys.argv[1]
     decision_json = sys.argv[2]
 
-    decision_data = json.loads(decision_json)
+    try:
+        decision_data = json.loads(decision_json)
+    except json.JSONDecodeError as exc:
+        print(json.dumps({
+            "error": "invalid decision_json",
+            "details": str(exc),
+        }))
+        sys.exit(1)
     decision = decision_data.get("decision", "FAIL")
     best_metric = decision_data.get("best_metric")
     # For KEEP, best_metric is this round's value. For DISCARD we have no metric.
@@ -90,7 +105,7 @@ def main():
             break
 
     # Add to settled history table
-    history_line = f"| {settled_item_id} | {decision} | {metric_val or 'N/A'} | {settled_item_desc} |"
+    history_line = f"| {settled_item_id} | {decision} | {metric_val if metric_val is not None else 'N/A'} | {settled_item_desc} |"
     # Find the table and append
     table_end = None
     for i, line in enumerate(lines):

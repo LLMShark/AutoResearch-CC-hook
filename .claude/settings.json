@@ -5,14 +5,19 @@
       "Bash(bash .autoresearch/scripts/*)",
       "Bash(export AR_TASK_DIR=*)",
       "Bash(curl *127.0.0.1*)",
-      "Bash(git *)",
-      "Bash(ssh *)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git status)",
+      "Bash(git status *)",
+      "Bash(git blame *)",
+      "Bash(git show *)",
+      "Bash(git rev-parse *)",
       "Bash(mkdir *)",
       "Bash(ls *)",
       "Bash(cat *)",
-      "Read(/**)"
+      "Read($CLAUDE_PROJECT_DIR/**)"
     ],
-    "defaultMode": "bypassPermissions"
+    "defaultMode": "acceptEdits"
   },
   "hooks": {
     "PreToolUse": [
