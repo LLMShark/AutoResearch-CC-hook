@@ -2,12 +2,15 @@
 Standalone task.yaml parser + eval execution.
 
 Parses the task config, generates the tarball shipped to the remote worker
-(reference.py, kernel.py, auto-generated verify/profile scripts, cached
-reference.pt), and dispatches to remote or local eval.
+(reference.py, kernel.py, auto-generated verify/profile scripts), and
+dispatches to remote or local eval. Reference outputs are never shipped:
+worker self-caches them under /tmp/ar_cache/<op>_<sha(reference.py)>/
+reference.pt on first verify.
 
 Only requires: stdlib + pyyaml.
 """
 
+import hashlib
 import io
 import json
 import operator as _op
@@ -72,10 +75,9 @@ class TaskConfig:
     When non-empty, eval is routed to remote workers instead of local subprocess."""
 
     worker_ssh_host: Optional[str] = None
-    """SSH alias of the same machine the worker runs on (e.g. "npu"). When
-    set, reference_capture scp's the captured reference.pt to the worker's
-    /tmp cache once, and subsequent eval tarballs omit it — big speed win
-    for large-tensor ops."""
+    """Deprecated. Previously used to scp a locally captured reference.pt
+    to the worker; now worker self-caches on first verify, so this field is
+    ignored. Kept for yaml back-compat."""
 
 
 @dataclass
@@ -193,26 +195,29 @@ def _detect_device_type(config: TaskConfig) -> str:
 
 
 def _gen_verify_script(config: TaskConfig, device_id: int = 0,
-                       worker_ref_path: Optional[str] = None) -> str:
+                       worker_ref_path: str = "") -> str:
     """Generate verify_{op_name}.py for the Worker Service.
 
-    reference.pt resolution order (first hit wins):
-      1. `worker_ref_path` absolute path (e.g. /tmp/ar_cache/<task>/reference.pt)
-         — set by _build_package when reference_capture already scp'd the
-         file to the worker. Tarball no longer bundles reference.pt.
-      2. `reference.pt` in the extract dir (legacy / no-ssh-host setups).
-      3. Inline fallback: import Model, run with get_inputs(). Slowest but
-         always correct.
+    Reference outputs live in a worker-local cache keyed by op_name + sha of
+    reference.py (path passed as `worker_ref_path`). On first verify the
+    script computes Model on the target device, writes the cache, and uses
+    the result. On subsequent verifies it loads the cache. The cache is
+    invalidated automatically when reference.py content changes (different
+    sha → different path).
     """
     device = _detect_device_type(config)
     kernel_file = config.editable_files[0].replace(".py", "")
     ref_file = (config.ref_file or "reference.py").replace(".py", "")
     atol = config.correctness_atol
     rtol = config.correctness_rtol
-    worker_ref_literal = repr(worker_ref_path) if worker_ref_path else "None"
     return f'''\
 #!/usr/bin/env python3
-"""Auto-generated verify script for Worker Service."""
+"""Auto-generated verify script for Worker Service.
+
+Worker-side reference cache: if WORKER_REF_PT exists, load it; otherwise
+run Model on device once, save outputs there, then use them. No local
+PyTorch forward — local client never runs Model.
+"""
 import os, sys, json, traceback
 
 device_type = "{device}"
@@ -233,20 +238,8 @@ else:
 
 ATOL = {atol!r}
 RTOL = {rtol!r}
-# Resolution order for reference.pt: worker-side cache (scp'd once) →
-# extract-dir bundle → inline recompute.
-WORKER_REF_PT = {worker_ref_literal}
-LOCAL_REF_PT = "reference.pt"
-if WORKER_REF_PT and os.path.isfile(WORKER_REF_PT):
-    REF_PT = WORKER_REF_PT
-elif os.path.isfile(LOCAL_REF_PT):
-    REF_PT = LOCAL_REF_PT
-else:
-    REF_PT = ""
+WORKER_REF_PT = {worker_ref_path!r}
 
-# ModelNew is the ONLY import we require to succeed — ref is usually loaded
-# from the cached .pt. Import failure here means the kernel file itself is
-# broken (syntax, name missing, etc.).
 try:
     from {kernel_file} import ModelNew
 except Exception as e:
@@ -256,32 +249,48 @@ except Exception as e:
     sys.exit(1)
 
 try:
-    # Inputs are ALWAYS regenerated locally via get_inputs() — it's
-    # deterministic (fixed torch.manual_seed) and shipping input tensors in
-    # reference.pt would bloat the per-eval tarball (esp. for large ops).
+    # Inputs are regenerated here via get_inputs() — deterministic seed, so
+    # cache keyed only on reference.py content is sufficient.
     from {ref_file} import get_inputs, get_init_inputs
     init_inputs = get_init_inputs()
-    ref_inputs = get_inputs()
+    ref_inputs_cpu = get_inputs()
 
-    # --- Obtain reference outputs ---
-    if REF_PT:
-        ref_data = torch.load(REF_PT, map_location="cpu", weights_only=False)
+    # --- Obtain reference outputs (cache-or-compute, worker-side only) ---
+    if WORKER_REF_PT and os.path.isfile(WORKER_REF_PT):
+        ref_data = torch.load(WORKER_REF_PT, map_location="cpu", weights_only=False)
         out_ref = ref_data["outputs"]
-        ref_source = "cached-worker" if REF_PT == WORKER_REF_PT else "cached-bundled"
+        ref_source = "cached-worker"
     else:
         from {ref_file} import Model
-        model_ref = Model(*init_inputs).cpu().eval()
+        model_ref = Model(*init_inputs).to(device).eval()
+        ref_inputs_dev = [x.to(device) if hasattr(x, "to") else x for x in ref_inputs_cpu]
         with torch.no_grad():
-            out_ref = model_ref(*ref_inputs)
-        if isinstance(out_ref, torch.Tensor):
-            out_ref = [out_ref]
-        elif not isinstance(out_ref, (list, tuple)):
-            out_ref = [out_ref]
-        ref_source = "inline"
+            out_ref_raw = model_ref(*ref_inputs_dev)
+        if isinstance(out_ref_raw, torch.Tensor):
+            out_ref = [out_ref_raw.detach().cpu()]
+        elif isinstance(out_ref_raw, (list, tuple)):
+            out_ref = [o.detach().cpu() for o in out_ref_raw]
+        else:
+            out_ref = [out_ref_raw]
+        if WORKER_REF_PT:
+            try:
+                os.makedirs(os.path.dirname(WORKER_REF_PT), exist_ok=True)
+                torch.save({{"outputs": out_ref}}, WORKER_REF_PT)
+            except Exception as _e:
+                print(f"[verify] WARNING: ref cache write failed ({{WORKER_REF_PT}}): {{_e}}",
+                      file=sys.stderr)
+        ref_source = "computed-worker"
+        # Free the ref model before ModelNew allocates — BatchNorm-scale
+        # tensors on HBM don't fit both at once.
+        del model_ref, out_ref_raw, ref_inputs_dev
+        if device_type == "npu":
+            torch.npu.empty_cache()
+        elif device_type == "cuda":
+            torch.cuda.empty_cache()
 
     # --- Run kernel on device with the same deterministic inputs ---
     model_new = ModelNew(*init_inputs).to(device).eval()
-    inputs = [x.to(device) if hasattr(x, "to") else x for x in ref_inputs]
+    inputs = [x.to(device) if hasattr(x, "to") else x for x in ref_inputs_cpu]
 
     with torch.no_grad():
         out_new = model_new(*inputs)
@@ -475,17 +484,40 @@ print(f"PROFILE_RESULT: {{avg_us}}")
 '''
 
 
+_WORKER_CACHE_ROOT = "/tmp/ar_cache"
+
+
+def _compute_worker_ref_path(task_dir: str, config: TaskConfig) -> str:
+    """Stable worker-side cache path, keyed by op_name + sha(reference.py).
+
+    Different reference.py content → different path → automatic invalidation.
+    Same reference.py across many kernel iterations → cache hits after round 1.
+    """
+    ref_file = config.ref_file or "reference.py"
+    ref_full = os.path.join(task_dir, ref_file)
+    if os.path.isfile(ref_full):
+        with open(ref_full, "rb") as f:
+            ref_hash = hashlib.sha256(f.read()).hexdigest()[:12]
+    else:
+        ref_hash = "unknown"
+    return f"{_WORKER_CACHE_ROOT}/{config.name}_{ref_hash}/reference.pt"
+
+
 def _build_package(task_dir: str, config: TaskConfig, device_id: int = 0) -> bytes:
     """Build a tar.gz package with worker-compatible scripts.
 
     Generates and includes:
-      - verify_{op_name}.py     (correctness check)
+      - verify_{op_name}.py     (correctness check, self-caches ref on worker)
       - profile_{op_name}_base.py (reference timing)
       - profile_{op_name}_generation.py (kernel timing)
       - kernel.py, reference.py, and any support .py files
+
+    Reference outputs are NEVER shipped in the tarball — worker computes them
+    on first verify and caches under /tmp/ar_cache/<op>_<ref_sha>/reference.pt.
     """
     op_name = config.name
     buf = io.BytesIO()
+    worker_ref_path = _compute_worker_ref_path(task_dir, config)
 
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         # Add editable files
@@ -509,24 +541,6 @@ def _build_package(task_dir: str, config: TaskConfig, device_id: int = 0) -> byt
                 fpath = os.path.join(task_dir, f)
                 if os.path.isfile(fpath):
                     tar.add(fpath, arcname=f)
-
-        # Cached PyTorch reference outputs. Two paths:
-        #   (a) Marker `.ar_state/.ref_on_worker` present (reference_capture
-        #       successfully scp'd the file to the worker's /tmp cache) —
-        #       skip bundling; verify script reads the absolute path instead.
-        #   (b) No marker — bundle reference.pt into the tarball (legacy
-        #       path, used when worker.ssh_host isn't configured).
-        ref_pt = os.path.join(task_dir, ".ar_state", "reference.pt")
-        marker = os.path.join(task_dir, ".ar_state", ".ref_on_worker")
-        worker_ref_path = None
-        if os.path.isfile(marker):
-            try:
-                info = json.load(open(marker, encoding="utf-8"))
-                worker_ref_path = info.get("remote_path")
-            except Exception:
-                worker_ref_path = None
-        if worker_ref_path is None and os.path.isfile(ref_pt):
-            tar.add(ref_pt, arcname="reference.pt")
 
         # Generate and add worker scripts
         def _add_script(name: str, content: str):

@@ -1,0 +1,17 @@
+# 远端 worker 清单。配合 README「启动远端 worker（通用流程）」使用。
+# machines : 每台机器一次填好的固定参数。
+# workers  : 每个 worker 实例的运行时参数，对应 akg_cli worker --start 的 flags。
+
+machines:
+  npu:
+    ssh_host:       # 运行此项目的本地机器 ~/.ssh/config 里的远端机器别名
+    env_dir:        # source env.sh 的目录
+    akg_agents:     # akg_cli 所在的 akg_agents 路径
+
+workers:
+  - name: npu-b2-4              # 本地记号，用于人类引用
+    machine: npu                # 对应上面 machines 里的 key
+    backend: ascend
+    arch: ascend910b2           # 由 npu-smi info Name 列决定
+    devices: [4]                # NPU 下标；多卡写 [1,2,3] 这样的格式
+    port: 9111                  # 本机端口，一 worker 一端口

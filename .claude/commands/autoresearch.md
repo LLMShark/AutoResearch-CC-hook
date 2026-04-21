@@ -70,7 +70,11 @@ Follow the phase guidance. Never stop between phases.
   (append `--worker-url` if configured). If scaffold already ran baseline,
   this phase is skipped automatically.
 - **PLAN / DIAGNOSE / REPLAN** —
-  `python .autoresearch/scripts/create_plan.py "$AR_TASK_DIR" '<JSON>'`.
+  `python .autoresearch/scripts/create_plan.py "$AR_TASK_DIR" '<items>...</items>'`.
+  The payload is an XML `<items>` document (see the hook guidance for the
+  exact schema — XML is used instead of JSON to reduce structural
+  hallucinations). If shell-quoting the XML is awkward, write it to a file
+  and pass `@path.xml` as the second argument.
   When the hook's `additionalContext` gives you a TodoWrite payload, call
   TodoWrite with it verbatim.
 - **EDIT** — Edit `kernel.py` (multiple Edit calls OK). When done:

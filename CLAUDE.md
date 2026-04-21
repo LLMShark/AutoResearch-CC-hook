@@ -93,7 +93,9 @@ latest hook message. The following invariants are non-negotiable:
    patch state files to recover.
 7. **`create_plan.py` rejects mean the plan has a real problem** (diversity,
    repeated failure keywords, short rationale). Read the stderr reason and
-   rewrite — do not retry the same JSON.
+   rewrite — do not retry the same XML payload. The script consumes an
+   `<items>` XML document (chosen over JSON because LLMs hallucinate fewer
+   structural errors in tag-delimited text).
 8. **TodoWrite sync is mandatory.** When a hook emits `additionalContext`
    with a `TodoWrite payload`, call TodoWrite with that payload verbatim on
    the next turn.

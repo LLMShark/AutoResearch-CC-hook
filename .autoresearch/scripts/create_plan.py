@@ -1,23 +1,32 @@
 #!/usr/bin/env python3
 """
-Create or replace plan.md from structured JSON input.
+Create or replace plan.md from structured XML input.
 
-Claude provides content, this script handles format. Zero chance of format errors.
+Claude provides content, this script handles format. XML is preferred over JSON
+because LLMs hallucinate fewer structural/escape errors in tag-delimited text.
 
 Usage:
-    python .autoresearch/scripts/create_plan.py <task_dir> '<items_json>'
+    python .autoresearch/scripts/create_plan.py <task_dir> '<items_xml>'
 
-items_json format (each item is a dict):
-    [
-        {"desc": "...", "rationale": "... (30-400 chars)", "keywords": "k1, k2"},
-        ...
-    ]
+items_xml format:
+    <items>
+      <item>
+        <desc>short sentence describing the change</desc>
+        <rationale>30-400 char explanation of why it should help</rationale>
+        <keywords>comma-separated tags</keywords>
+      </item>
+      ...
+    </items>
 
-Optional per-item field: "reactivate_pid": "pN"
+Optional per-item element: <reactivate_pid>pN</reactivate_pid>
     Reuse a previously-settled pid (must be DISCARD or FAIL in history). The
     pid keeps its original id — the monotonic counter is NOT consumed for it.
     Used when a previously-explored idea may combine differently with current
     state (e.g. an autotune sweep that was DISCARD before a fusion landed).
+
+If <items_xml> begins with '@', the remainder is treated as a path and the
+XML is read from that file (useful when the payload would be awkward to
+shell-quote).
 
 Output: writes plan.md, prints JSON status.
 """
@@ -25,6 +34,7 @@ import json
 import os
 import re
 import sys
+import xml.etree.ElementTree as ET
 from collections import Counter
 from datetime import datetime, timezone
 
@@ -57,26 +67,48 @@ def _fail(msg: str):
     sys.exit(1)
 
 
+_ALLOWED_ITEM_TAGS = {"desc", "rationale", "keywords", "reactivate_pid"}
+
+
+def _parse_items_xml(xml_str: str) -> list:
+    """Parse <items><item>...</item>...</items> into a list of dicts.
+
+    Recognized child elements under <item>: desc, rationale, keywords,
+    reactivate_pid. Unknown tags are rejected so typos surface loudly
+    rather than silently dropping fields.
+    """
+    try:
+        root = ET.fromstring(xml_str)
+    except ET.ParseError as e:
+        _fail(f"Invalid XML: {e}")
+    if root.tag != "items":
+        _fail(f"Root element must be <items>, got <{root.tag}>")
+    items = []
+    for i, child in enumerate(list(root)):
+        if child.tag != "item":
+            _fail(f"Unexpected <{child.tag}> under <items> (only <item> allowed)")
+        d = {}
+        for sub in list(child):
+            if sub.tag not in _ALLOWED_ITEM_TAGS:
+                _fail(f"Item {i}: unknown element <{sub.tag}> "
+                      f"(allowed: {sorted(_ALLOWED_ITEM_TAGS)})")
+            if sub.tag in d:
+                _fail(f"Item {i}: duplicate <{sub.tag}>")
+            d[sub.tag] = (sub.text or "").strip()
+        items.append(d)
+    return items
+
+
 def _validate_items(items):
     if not isinstance(items, list) or len(items) < 3:
         _fail(f"Need >= 3 items, got {len(items) if isinstance(items, list) else 'non-list'}")
     for i, item in enumerate(items):
-        if not isinstance(item, dict):
-            _fail(f"Item {i}: must be a dict")
         for field in ("desc", "rationale", "keywords"):
             if field not in item:
-                _fail(f"Item {i}: missing '{field}'")
-        # Normalize keywords: accept list ["a", "b"] OR string "a, b"
-        kw = item["keywords"]
-        if isinstance(kw, list):
-            kw = ", ".join(str(x).strip() for x in kw if str(x).strip())
-        elif isinstance(kw, str):
-            kw = kw.strip()
-        else:
-            _fail(f"Item {i}: 'keywords' must be a list or comma-separated string "
-                  f"(got {type(kw).__name__})")
+                _fail(f"Item {i}: missing <{field}>")
+        kw = item["keywords"].strip()
         if not kw:
-            _fail(f"Item {i}: 'keywords' is empty")
+            _fail(f"Item {i}: <keywords> is empty")
         item["keywords"] = kw
 
         for field in ("desc", "rationale"):
@@ -381,13 +413,19 @@ def _render_plan(version: int, item_ids: list, items: list, settled_rows: str) -
 
 def main():
     task_dir = sys.argv[1]
-    items_json = sys.argv[2]
+    arg = sys.argv[2]
 
-    try:
-        items = json.loads(items_json)
-    except json.JSONDecodeError as e:
-        _fail(f"Invalid JSON: {e}")
+    if arg.startswith("@"):
+        path = arg[1:]
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                xml_str = f.read()
+        except OSError as e:
+            _fail(f"Cannot read XML from {path!r}: {e}")
+    else:
+        xml_str = arg
 
+    items = _parse_items_xml(xml_str)
     _validate_items(items)
     _check_diversity(items)
     _warn_repeated_failures(task_dir)

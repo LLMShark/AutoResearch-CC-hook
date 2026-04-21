@@ -194,11 +194,9 @@ def main():
     parser.add_argument("--worker-url", default=None,
                         help="Remote worker URL(s), comma-separated")
     parser.add_argument("--worker-ssh-host", default=None,
-                        help=("SSH alias of the machine running the worker "
-                              "(e.g. 'npu'). When set, reference.pt is "
-                              "scp'd to the worker's /tmp cache once and "
-                              "every eval tarball skips bundling it — use "
-                              "this for ops with large input tensors."))
+                        help=("Deprecated no-op. Worker now self-caches ref "
+                              "outputs on first verify; local client never "
+                              "ships reference.pt. Kept for yaml back-compat."))
     parser.add_argument("--max-rounds", type=int, default=20)
     parser.add_argument("--eval-timeout", type=int, default=120)
     parser.add_argument("--output-dir", default=None,
@@ -289,27 +287,9 @@ def main():
     for f in sorted(os.listdir(task_dir)):
         print(f"  {f}", file=sys.stderr)
 
-    # Optionally run baseline eval. Skip in --desc mode: reference.py is a TODO
-    # placeholder until Claude fills it, so baseline would fail.
-    if args.ref:
-        # Capture the PyTorch reference ONCE on CPU. All subsequent verify
-        # rounds compare the kernel against this stored .pt — we never re-run
-        # the reference Model during normal operation.
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        print(f"[scaffold] Capturing PyTorch reference outputs (CPU)...",
-              file=sys.stderr)
-        cap = subprocess.run(
-            [sys.executable, os.path.join(script_dir, "reference_capture.py"), task_dir],
-            capture_output=True, text=True,
-        )
-        if cap.stderr:
-            print(cap.stderr, end="", file=sys.stderr)
-        if cap.returncode != 0:
-            print(f"[scaffold] WARNING: reference capture failed — verify "
-                  f"will fall back to running Model inline each round.",
-                  file=sys.stderr)
-        else:
-            print(f"[scaffold] Reference saved.", file=sys.stderr)
+    # Reference outputs are no longer captured locally. Worker side caches
+    # them on the first verify round (keyed on reference.py sha) and reuses
+    # across rounds. This saves a multi-GiB upload per large-tensor op.
 
     if args.run_baseline and args.ref:
         print(f"[scaffold] Running baseline eval...", file=sys.stderr)

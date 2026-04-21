@@ -187,18 +187,32 @@ REF_WRITE_PHASES = {p for p, classes in _EDIT_RULES.items() if "ref" in classes}
 # dashboards surface `desc` directly in the history and plan tables, so
 # "Fuse SwiGLU into the matmul epilogue to avoid a second launch" reads far
 # better than "fuse_swiglu_epilogue". create_plan.py enforces the prose form.
-_PLAN_ITEM_EXAMPLE = (
-    '{"desc": "Fuse SwiGLU into the matmul epilogue to avoid a second launch",'
-    ' "rationale": "Separate SwiGLU kernel re-reads the matmul output from DRAM;'
-    ' fusing it into the epilogue cuts one round-trip and a launch.",'
-    ' "keywords": "fusion, epilogue"}'
+#
+# XML is the required format — tag-delimited text is structurally harder for
+# LLMs to hallucinate than JSON (no stray commas / quote escaping / brace
+# balance to track).
+_PLAN_XML_EXAMPLE = (
+    '<items>'
+    '<item>'
+    '<desc>Fuse SwiGLU into the matmul epilogue to avoid a second launch</desc>'
+    '<rationale>Separate SwiGLU kernel re-reads the matmul output from DRAM; '
+    'fusing it into the epilogue cuts one round-trip and a launch.</rationale>'
+    '<keywords>fusion, epilogue</keywords>'
+    '</item>'
+    '<!-- repeat <item> for >= 3 total -->'
+    '</items>'
 )
 _PLAN_FIELD_RULES = (
-    "Provide >= 3 items as a JSON array. Each item needs:\n"
-    "  - desc:      short SENTENCE describing the change (>=12 chars, must have "
-    "spaces — not a snake_case label; the dashboard shows this verbatim)\n"
-    "  - rationale: 30-400 char explanation of WHY it should help\n"
-    "  - keywords:  comma-separated tags or JSON list, e.g. \"fusion, epilogue\""
+    "Provide >= 3 items as an <items> XML document. Each <item> needs:\n"
+    "  - <desc>:      short SENTENCE describing the change (>=12 chars, must "
+    "have spaces — not a snake_case label; the dashboard shows this verbatim)\n"
+    "  - <rationale>: 30-400 char explanation of WHY it should help\n"
+    "  - <keywords>:  comma-separated tags, e.g. fusion, epilogue\n"
+    "Optional: <reactivate_pid>pN</reactivate_pid> to reuse a previously "
+    "DISCARD/FAIL pid. Escape '&', '<', '>' in text as '&amp;', '&lt;', '&gt;' "
+    "(or wrap the field in <![CDATA[...]]>). "
+    "If shell-quoting is awkward, write the XML to a file and pass '@path.xml' "
+    "as the second argument instead."
 )
 
 
@@ -566,7 +580,7 @@ def get_guidance(task_dir: str) -> str:
         return (f"[AR Phase: PLAN] "
                 f"Read task.yaml, editable files ({editable}), and reference.py.{skills_hint}{metric_hint}\n"
                 f"Then create the plan by running:\n"
-                f'python .autoresearch/scripts/create_plan.py "{task_dir}" \'[{_PLAN_ITEM_EXAMPLE}, ...]\'\n'
+                f'python .autoresearch/scripts/create_plan.py "{task_dir}" \'{_PLAN_XML_EXAMPLE}\'\n'
                 f"{_PLAN_FIELD_RULES}\n"
                 f"The script writes plan.md in the correct format. Hook validates and advances to EDIT.\n"
                 f"After plan creation, sync items to TodoWrite.")
@@ -608,12 +622,12 @@ def get_guidance(task_dir: str) -> str:
                 f"  - NOT more parameter tuning\n"
                 f"Recent failures:\n{fail_summary}\n"
                 f"After diagnosis, create NEW plan with >= 3 items:\n"
-                f'python .autoresearch/scripts/create_plan.py "{task_dir}" \'[{_PLAN_ITEM_EXAMPLE}, ...]\'\n'
+                f'python .autoresearch/scripts/create_plan.py "{task_dir}" \'{_PLAN_XML_EXAMPLE}\'\n'
                 f"{_PLAN_FIELD_RULES}\n"
                 f"Items must be diverse: max 1 parameter-tuning item, rest must be structural changes.\n"
                 f"If a past DISCARD/FAIL pid now looks salvageable (e.g. root "
                 f"cause was unrelated, structural state has changed), add "
-                f"`\"reactivate_pid\": \"pN\"` to an item to reuse that id "
+                f"`<reactivate_pid>pN</reactivate_pid>` to an item to reuse that id "
                 f"instead of consuming a fresh counter slot.\n"
                 f"Then sync TodoWrite.")
 
@@ -631,7 +645,7 @@ def get_guidance(task_dir: str) -> str:
                 "metric was close to best (within ~20%) — those ideas may "
                 "compose differently now that the kernel's structural baseline "
                 "has shifted. To reactivate one, add "
-                "`\"reactivate_pid\": \"pN\"` to an item; the old pid is reused "
+                "`<reactivate_pid>pN</reactivate_pid>` to an item; the old pid is reused "
                 "(not a new pN allocated), and history.jsonl gets a REACTIVATE "
                 "marker. Only DISCARD/FAIL pids may be reactivated."
                 .format(v=plan_ver)
@@ -639,7 +653,7 @@ def get_guidance(task_dir: str) -> str:
         return (f"[AR Phase: REPLAN] All items settled. Budget: {remaining} rounds left. "
                 f"Read .ar_state/history.jsonl. Analyze what worked/failed.\n"
                 f"To continue, create new plan:\n"
-                f'python .autoresearch/scripts/create_plan.py "{task_dir}" \'[{_PLAN_ITEM_EXAMPLE}, ...]\'\n'
+                f'python .autoresearch/scripts/create_plan.py "{task_dir}" \'{_PLAN_XML_EXAMPLE}\'\n'
                 f"{_PLAN_FIELD_RULES}\n"
                 f"Or if no promising directions, do nothing (hooks will advance to FINISH)."
                 f"{reactivation_hint}")
