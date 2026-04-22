@@ -69,12 +69,22 @@ Follow the phase guidance. Never stop between phases.
 - **BASELINE** — `python .autoresearch/scripts/baseline.py "$AR_TASK_DIR"`
   (append `--worker-url` if configured). If scaffold already ran baseline,
   this phase is skipped automatically.
-- **PLAN / DIAGNOSE / REPLAN** —
-  `python .autoresearch/scripts/create_plan.py "$AR_TASK_DIR" '<items>...</items>'`.
-  The payload is an XML `<items>` document (see the hook guidance for the
-  exact schema — XML is used instead of JSON to reduce structural
-  hallucinations). If shell-quoting the XML is awkward, write it to a file
-  and pass `@path.xml` as the second argument.
+- **PLAN / DIAGNOSE / REPLAN** — run
+  `python .autoresearch/scripts/create_plan.py "$AR_TASK_DIR" @<path>` after
+  writing the XML `<items>` document to `<path>` with the Write tool (see the
+  hook guidance for the exact schema — XML is used instead of JSON to reduce
+  structural hallucinations). The canonical path is
+  `"$AR_TASK_DIR/.ar_state/plan_items.xml"`.
+
+  **Do not** quote multi-line XML inline on the command line — on Windows,
+  bash / CreateProcess silently truncates it and the script then emits what
+  looks like a schema error (`"missing <desc>"` etc.) even though your XML is
+  correct. If you see that error after an inline invocation, stop retrying
+  the schema and switch to the `@<path>` form.
+
+  Alternative when writing a file is not convenient: pass `-` as the second
+  argument and pipe the XML in on stdin via a single-quoted heredoc.
+
   When the hook's `additionalContext` gives you a TodoWrite payload, call
   TodoWrite with it verbatim.
 - **EDIT** — Edit `kernel.py` (multiple Edit calls OK). When done:

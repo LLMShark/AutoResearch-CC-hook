@@ -25,8 +25,11 @@ Optional per-item element: <reactivate_pid>pN</reactivate_pid>
     state (e.g. an autotune sweep that was DISCARD before a fusion landed).
 
 If <items_xml> begins with '@', the remainder is treated as a path and the
-XML is read from that file (useful when the payload would be awkward to
-shell-quote).
+XML is read from that file. If <items_xml> is exactly '-', XML is read from
+stdin. Prefer these over inline argv — on Windows, multi-line XML passed
+through bash argv can be silently truncated by the shell / CreateProcess,
+producing misleading "missing <desc>" style errors that look like schema
+bugs but are actually IPC truncation.
 
 Output: writes plan.md, prints JSON status.
 """
@@ -61,9 +64,23 @@ _STOPWORDS = {"the", "a", "to", "of", "in", "for", "and", "with", "from", "by",
 
 _PID_RE = re.compile(r"^p\d+$")
 
+# Tracks where the XML payload came from so error messages can steer the
+# caller toward a robust input channel when argv looks suspicious. Set in
+# main() before any _fail() call that depends on parsed content.
+_SOURCE_MODE = "argv"  # one of: "argv", "file", "stdin"
+
 
 def _fail(msg: str):
-    print(json.dumps({"ok": False, "error": msg}))
+    hint = ""
+    if _SOURCE_MODE == "argv":
+        # If this trips, the model almost certainly got here by inline-quoting
+        # multi-line XML — which is exactly the Windows-argv failure mode. Say
+        # so loudly so retries don't loop on "fix the schema".
+        hint = (" [hint: payload was passed inline via argv. On Windows this "
+                "is often truncated by the shell, producing errors that look "
+                "like schema bugs. Write the XML to a file and pass "
+                "'@<path>', or pipe it via stdin with '-' as the 2nd arg.]")
+    print(json.dumps({"ok": False, "error": msg + hint}))
     sys.exit(1)
 
 
@@ -412,10 +429,15 @@ def _render_plan(version: int, item_ids: list, items: list, settled_rows: str) -
 
 
 def main():
+    global _SOURCE_MODE
     task_dir = sys.argv[1]
     arg = sys.argv[2]
 
-    if arg.startswith("@"):
+    if arg == "-":
+        _SOURCE_MODE = "stdin"
+        xml_str = sys.stdin.read()
+    elif arg.startswith("@"):
+        _SOURCE_MODE = "file"
         path = arg[1:]
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -423,6 +445,7 @@ def main():
         except OSError as e:
             _fail(f"Cannot read XML from {path!r}: {e}")
     else:
+        _SOURCE_MODE = "argv"
         xml_str = arg
 
     items = _parse_items_xml(xml_str)
