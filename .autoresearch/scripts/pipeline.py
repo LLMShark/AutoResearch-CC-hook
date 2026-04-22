@@ -22,6 +22,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from task_config import load_task_config
+from failure_extractor import format_for_stdout
 from phase_machine import (
     write_phase, compute_next_phase, get_active_item,
     get_guidance, auto_rollback, load_progress, edit_marker_path,
@@ -92,6 +93,24 @@ def main():
     correctness = eval_json.get("correctness", False)
     metrics = eval_json.get("metrics", {})
     print(f"[PIPELINE] Eval: correctness={correctness}, metrics={metrics}", flush=True)
+
+    # Surface structured failure signals (UB overflow, aivec trap, OOM, ...)
+    # extracted from the worker's raw log. Without this, Claude sees only a
+    # generic "verify failed" string and has nothing to act on. Fall back
+    # through increasingly coarse sources so *something* always reaches the
+    # user on failure.
+    if not correctness or eval_json.get("error"):
+        if eval_json.get("error"):
+            print(f"[PIPELINE] Error: {eval_json['error']}", flush=True)
+        pretty = format_for_stdout(eval_json.get("failure_signals") or {})
+        if pretty:
+            print(pretty, flush=True)
+        elif eval_json.get("raw_output_tail"):
+            # No known pattern matched — dump the tail raw so Claude still
+            # has something concrete to work with.
+            print("[PIPELINE] Worker log tail (no structured signals matched):",
+                  flush=True)
+            print(eval_json["raw_output_tail"], flush=True)
 
     # === Step 3: Keep or discard ===
     kd_cmd = [sys.executable, os.path.join(SCRIPT_DIR, "keep_or_discard.py"),

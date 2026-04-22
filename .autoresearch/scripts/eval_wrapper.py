@@ -19,6 +19,7 @@ import sys
 # Import from sibling module
 sys.path.insert(0, os.path.dirname(__file__))
 from task_config import load_task_config, run_eval, format_result_summary
+from failure_extractor import extract_failure_signals
 
 
 def main():
@@ -57,6 +58,14 @@ def main():
         "metrics": result.metrics,
         "error": result.error,
     }
+    # Attach structured failure signals only when something went wrong — on
+    # success the raw log is noisy and adds no value to downstream consumers.
+    # `raw_output` is already capped upstream (4 KB tail in task_config), so
+    # we forward it whole — the pipeline falls back to printing it verbatim
+    # when no pattern matched.
+    if not result.correctness or result.error:
+        output["failure_signals"] = extract_failure_signals(result.raw_output)
+        output["raw_output_tail"] = result.raw_output or ""
     print(json.dumps(output))
 
 
